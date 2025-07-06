@@ -1,6 +1,9 @@
 import { Wallet } from "@solana/solana-sdk"
 import { z } from "zod"
-import type { RequestFaucetFundsArgumentsType, RequestFaucetFundsActionResultType } from "./types"
+import type {
+  RequestFaucetFundsArgumentsType,
+  RequestFaucetFundsActionResultType,
+} from "./types"
 
 const FaucetParamsSchema = z.object({
   assetId: z.string().optional(),
@@ -13,9 +16,11 @@ export async function acquireTestFunds(
   rawParams: unknown
 ): Promise<RequestFaucetFundsActionResultType> {
   const parsed = FaucetParamsSchema.safeParse(rawParams)
+
   if (!parsed.success) {
+    const message = parsed.error.issues.map(i => i.message).join("; ")
     return {
-      message: `Invalid parameters: ${parsed.error.issues.map(i => i.message).join("; ")}`,
+      message: `Invalid parameters: ${message}`,
       body: null,
       errorCode: "INVALID_PARAMS",
     }
@@ -24,28 +29,38 @@ export async function acquireTestFunds(
   const { assetId, retryCount, timeoutMs } = parsed.data
   const token = assetId || "SOL"
 
-  for (let attempt = 0; attempt <= retryCount; attempt++) {
-    try {
-      const tx = await wallet.faucet(assetId || undefined)
-      const confirmation = await Promise.race([
-        tx.wait(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeoutMs)),
-      ])
+  const tryRequest = async (): Promise<RequestFaucetFundsActionResultType> => {
+    const tx = await wallet.faucet(assetId || undefined)
 
-      const link = typeof confirmation.getTransactionLink === "function"
+    const confirmation = await Promise.race([
+      tx.wait(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout")), timeoutMs)
+      ),
+    ])
+
+    const link =
+      typeof confirmation.getTransactionLink === "function"
         ? confirmation.getTransactionLink()
         : "No link available"
 
-      return {
-        message: `Test tokens for ${token} received: ${link}`,
-        body: { transactionLink: link },
-        errorCode: null,
-      }
+    return {
+      message: `✅ Test tokens for ${token} received`,
+      body: { transactionLink: link },
+      errorCode: null,
+    }
+  }
+
+  for (let attempt = 0; attempt <= retryCount; attempt++) {
+    try {
+      return await tryRequest()
     } catch (error: any) {
-      if (attempt === retryCount) {
-        const msg = typeof error === "string" ? error : error?.message || "Unknown error"
+      const isLastAttempt = attempt === retryCount
+      const errMsg = typeof error === "string" ? error : error?.message || "Unknown error"
+
+      if (isLastAttempt) {
         return {
-          message: `Faucet request failed for ${token}: ${msg}`,
+          message: `❌ Faucet request failed for ${token}: ${errMsg}`,
           body: null,
           errorCode: "FAUCET_ERROR",
         }
@@ -53,9 +68,4 @@ export async function acquireTestFunds(
     }
   }
 
-  return {
-    message: `Unable to acquire test funds for ${token}`,
-    body: null,
-    errorCode: "UNREACHABLE",
-  }
 }
