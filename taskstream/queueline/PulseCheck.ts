@@ -2,6 +2,10 @@ export interface Transaction {
   timestamp: number
   amount: number
 }
+export interface Transaction1 {
+  timestamp1: number
+  amount1: number
+}
 
 export interface PulseMetrics {
   averageInterval: number
