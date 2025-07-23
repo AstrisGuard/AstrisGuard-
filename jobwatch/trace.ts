@@ -1,4 +1,3 @@
-
 export interface TransferRecord {
   timestamp: number
   from: string
@@ -14,60 +13,87 @@ export interface WhaleMovement {
   averageAmount: number
 }
 
+/**
+ * Group transfer records by whale address (either sender or receiver).
+ * @param records - list of transfer events
+ * @param minAmount - include only transfers ≥ this amount
+ * @param direction - "from" | "to" – which field to group on
+ */
 export function groupByWhale(
   records: TransferRecord[],
-  threshold: number
+  minAmount: number,
+  direction: "from" | "to" = "from"
 ): Record<string, TransferRecord[]> {
-  const groups: Record<string, TransferRecord[]> = {}
-  for (const r of records) {
-    if (r.amount >= threshold) {
-      groups[r.from] = groups[r.from] || []
-      groups[r.from].push(r)
-    }
-  }
-  return groups
+  return records
+    .filter(r => r.amount >= minAmount)
+    .reduce((acc, record) => {
+      const key = record[direction]
+      if (!acc[key]) acc[key] = []
+      acc[key].push(record)
+      return acc
+    }, {} as Record<string, TransferRecord[]>)
 }
 
+/**
+ * Convert grouped records into summarized movements.
+ */
 export function analyzeWhaleMovements(
   records: TransferRecord[],
-  threshold: number
+  minAmount: number,
+  direction: "from" | "to" = "from"
 ): WhaleMovement[] {
-  const groups = groupByWhale(records, threshold)
-  const movements: WhaleMovement[] = []
-  for (const whale in groups) {
-    const recs = groups[whale].sort((a, b) => a.timestamp - b.timestamp)
-    const total = recs.reduce((sum, r) => sum + r.amount, 0)
-    const avg = Math.round((total / recs.length) * 100) / 100
-    const first = recs[0].timestamp
-    const last = recs[recs.length - 1].timestamp
-    movements.push({ whale, totalMoved: total, firstSeen: first, lastSeen: last, averageAmount: avg })
-  }
-  return movements
+  const groups = groupByWhale(records, minAmount, direction)
+  return Object.entries(groups).map(([whale, recs]) => {
+    const sorted = recs.slice().sort((a, b) => a.timestamp - b.timestamp)
+    const total = sorted.reduce((sum, r) => sum + r.amount, 0)
+    const average = total / sorted.length
+    return {
+      whale,
+      totalMoved: total,
+      firstSeen: sorted[0].timestamp,
+      lastSeen: sorted[sorted.length - 1].timestamp,
+      averageAmount: Math.round(average * 100) / 100
+    }
+  })
 }
+
 
 export function detectConsecutiveBursts(
   movements: WhaleMovement[],
-  intervalMs: number
+  maxDurationMs: number
 ): WhaleMovement[] {
-  return movements.filter(m => m.lastSeen - m.firstSeen <= intervalMs)
+  return movements.filter(m => (m.lastSeen - m.firstSeen) <= maxDurationMs)
 }
 
-export function summarizeWhaleMovements(
-  movements: WhaleMovement[]
-): { totalWhales: number; highestMover: WhaleMovement | null } {
-  const total = movements.length
-  if (total === 0) return { totalWhales: 0, highestMover: null }
-  const highest = movements.reduce((a, b) => (b.totalMoved > a.totalMoved ? b : a))
-  return { totalWhales: total, highestMover: highest }
+/**
+ * Summarize overall whale activity.
+ */
+export function summarizeWhaleMovements(movements: WhaleMovement[]): {
+  totalWhales: number
+  highestMover: WhaleMovement | null
+} {
+  if (movements.length === 0) {
+    return { totalWhales: 0, highestMover: null }
+  }
+  const highest = movements.reduce((prev, curr) =>
+    curr.totalMoved > prev.totalMoved ? curr : prev
+  )
+  return {
+    totalWhales: movements.length,
+    highestMover: highest
+  }
 }
 
+/**
+ * Normalize total and average amounts to [0,1], preserving precision.
+ */
 export function normalizeMovementAmounts(
   movements: WhaleMovement[]
 ): WhaleMovement[] {
-  const max = Math.max(...movements.map(m => m.totalMoved), 1)
+  const maxTotal = Math.max(...movements.map(m => m.totalMoved), 1)
   return movements.map(m => ({
     ...m,
-    totalMoved: Math.round((m.totalMoved / max) * 10000) / 10000,
-    averageAmount: Math.round((m.averageAmount / max) * 10000) / 10000
+    totalMoved: Math.round((m.totalMoved / maxTotal) * 10000) / 10000,
+    averageAmount: Math.round((m.averageAmount / maxTotal) * 10000) / 10000
   }))
 }
