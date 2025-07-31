@@ -1,3 +1,4 @@
+import { ZodSchema } from "zod"
 
 export interface ActionContext {
   params: Record<string, any>
@@ -10,28 +11,40 @@ export interface ActionResult<T = any> {
   error?: string
 }
 
+/**
+ * Base class for running actions with validation and error handling.
+ */
 export abstract class ActionRunner<TInput = any, TOutput = any> {
-  abstract validate(input: unknown): input is TInput
+  abstract schema: ZodSchema<TInput>
   abstract execute(input: TInput, context: ActionContext): Promise<ActionResult<TOutput>>
+
+  /**
+   * Runs validation and execution, returning a standardized result.
+   */
   async run(rawInput: unknown, context: ActionContext): Promise<ActionResult<TOutput>> {
-    if (!this.validate(rawInput)) {
-      return { success: false, error: 'Invalid input' }
+    const parseResult = this.schema.safeParse(rawInput)
+    if (!parseResult.success) {
+      const issues = parseResult.error.issues.map(i => `${i.path.join(".")}: ${i.message}`)
+      return { success: false, error: `Validation failed: ${issues.join("; ")}` }
     }
+
     try {
-      const result = await this.execute(rawInput, context)
-      return result
+      return await this.execute(parseResult.data, context)
     } catch (err: any) {
-      return { success: false, error: err.message || 'Execution error' }
+      return { success: false, error: err.message || "Execution error" }
     }
   }
 }
 
+/**
+ * Factory for simple actions based on a Zod schema and executor function.
+ */
 export function createActionRunner<TI, TO>(
-  validator: (x: unknown) => x is TI,
+  schema: ZodSchema<TI>,
   executor: (input: TI, ctx: ActionContext) => Promise<ActionResult<TO>>
 ): ActionRunner<TI, TO> {
   return new (class extends ActionRunner<TI, TO> {
-    validate = validator
+    schema = schema
     execute = executor
   })()
 }
