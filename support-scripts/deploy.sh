@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Deploying SylphiaTools..."
+echo "Deploying AstrisTools..."
 docker-compose down
 docker-compose build
 docker-compose up -d
